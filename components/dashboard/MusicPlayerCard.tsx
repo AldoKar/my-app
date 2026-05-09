@@ -2,11 +2,14 @@
 
 import { Disc3, Music2, Quote } from "lucide-react";
 
-export default function MusicPlayerCard() {
-  // Dummy data para visualización
-  const currentSong = "Happy";
-  const currentArtist = "Pharrell Williams";
-  const lastLyric = "Because I'm happy... Clap along if you feel like a room without a roof";
+interface MusicPlayerCardProps {
+  songName: string | null;
+  artistName: string | null;
+  currentLyric: string | null;
+}
+
+export default function MusicPlayerCard({ songName, artistName, currentLyric }: MusicPlayerCardProps) {
+  const isPlaying = !!songName;
 
   return (
     <div className="bg-white border border-zinc-200 rounded-[32px] p-6 shadow-sm flex flex-col gap-6 relative overflow-hidden">
@@ -16,22 +19,40 @@ export default function MusicPlayerCard() {
       </div>
 
       <div className="flex items-center gap-4 relative z-10">
-        <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center shrink-0">
-          <Disc3 className="w-8 h-8 text-zinc-400 animate-[spin_4s_linear_infinite]" />
+        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 ${isPlaying ? "bg-blue-50" : "bg-zinc-100"}`}>
+          <Disc3
+            className={`w-8 h-8 ${
+              isPlaying ? "text-blue-500 animate-[spin_4s_linear_infinite]" : "text-zinc-300"
+            }`}
+          />
         </div>
         <div>
-          <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">Now Playing</p>
-          <h3 className="font-semibold text-zinc-900 text-lg leading-tight">{currentSong}</h3>
-          <p className="text-sm text-zinc-500">{currentArtist}</p>
+          <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">
+            {isPlaying ? "Now Playing" : "Esperando..."}
+          </p>
+          <h3 className="font-semibold text-zinc-900 text-lg leading-tight">
+            {songName || "Sin canción"}
+          </h3>
+          <p className="text-sm text-zinc-500">{artistName || "Presiona Escuchar"}</p>
         </div>
       </div>
 
-      <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
-        <Quote className="w-4 h-4 text-zinc-300 mb-2" />
-        <p className="text-zinc-700 italic text-sm leading-relaxed">
-          "{lastLyric}"
-        </p>
-      </div>
+      {currentLyric && (
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
+          <Quote className="w-4 h-4 text-zinc-300 mb-2" />
+          <p className="text-zinc-700 italic text-sm leading-relaxed">
+            &ldquo;{currentLyric}&rdquo;
+          </p>
+        </div>
+      )}
+
+      {!currentLyric && !isPlaying && (
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
+          <p className="text-zinc-400 text-sm text-center">
+            Graba audio para detectar la canción y sus lyrics
+          </p>
+        </div>
+      )}
     </div>
   );
 }
