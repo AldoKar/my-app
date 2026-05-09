@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>RhythmBot Test Client</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            padding: 20px;
+        }
+
+        video {
+            border: 2px solid #444;
+            border-radius: 8px;
+            width: 320px;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+
+        button:disabled {
+            background: #888;
+            cursor: not-allowed;
+        }
+
+        pre {
+            background: #000;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            color: #00ff00;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>🤖 RhythmBot - Test de Integración</h2>
+
+    <div>
+        <video id="videoElement" autoplay muted></video>
+    </div>
+
+    <button id="btnTest">1. Conectar y Analizar mi vibra</button>
+    <p id="status">Esperando...</p>
+
+    <h3>Respuesta de Gemini:</h3>
+    <pre id="jsonOutput">{ Aún no hay datos }</pre>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const btnTest = document.getElementById('btnTest');
+        const statusEl = document.getElementById('status');
+        const output = document.getElementById('jsonOutput');
+
+        // 1. Iniciar la cámara y el micrófono nada más abrir la página
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                video.srcObject = stream;
+                window.localStream = stream; // Guardar para usar el audio luego
+            })
+            .catch(err => {
+                statusEl.innerText = "❌ Error accediendo a la cámara/micro: " + err;
+            });
+
+        btnTest.addEventListener('click', async () => {
+            btnTest.disabled = true;
+            statusEl.innerText = "🔄 Grabando 2 segundos de audio y tomando foto...";
+
+            // --- CAPTURAR FOTO ---
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            // El backend de Python (b64decode) necesita el base64 PURO sin el prefijo "data:image/jpeg;base64,"
+            const fullImageB64 = canvas.toDataURL('image/jpeg', 0.5);
+            const imageB64Clean = fullImageB64.split(',')[1];
+
+            // --- CAPTURAR AUDIO (2 segundos) ---
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(window.localStream);
+            } catch (e) {
+                statusEl.innerText = "❌ Error creando grabador de audio: " + e.message;
+                console.error(e);
+                return;
+            }
+            const audioChunks = [];
+
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+            mediaRecorder.onstop = () => {
+                statusEl.innerText = "🚀 Enviando datos a FastAPI...";
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+
+                // Convertir Blob de audio a Base64
+                const reader = new FileReader();
+                reader.readAsDataURL(audioBlob);
+                reader.onloadend = () => {
+                    const fullAudioB64 = reader.result;
+                    const audioB64Clean = fullAudioB64.split(',')[1];
+
+                    enviarAlWebSocket(imageB64Clean, audioB64Clean);
+                };
+            };
+
+            mediaRecorder.start();
+            setTimeout(() => mediaRecorder.stop(), 10000); // Grabar por 10 segundos
+        });
+
+        function enviarAlWebSocket(imageB64, audioB64) {
+            // Conectar al WebSocket de tu FastAPI
+            const ws = new WebSocket("ws://127.0.0.1:8000/ws/chat");
+
+            ws.onopen = () => {
+                // Armar el JSON exactamente como el backend lo espera
+                const payload = {
+                    message: "Mírame y escúchame. ¿Qué emoción transmito?",
+                    image_b64: imageB64,
+                    audio_b64: audioB64
+                };
+                ws.send(JSON.stringify(payload));
+                statusEl.innerText = "🧠 Procesando con Gemini... (puede tomar unos segundos)";
+            };
+
+            ws.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                output.innerText = JSON.stringify(response, null, 2);
+                statusEl.innerText = "✅ ¡Éxito!";
+                btnTest.disabled = false;
+
+                // Cambiar el color de fondo temporalmente según lo que diga Gemini
+                if (response.screen_color) {
+                    document.body.style.border = `10px solid ${response.screen_color}`;
+                }
+                ws.close();
+            };
+
+            ws.onerror = (err) => {
+                statusEl.innerText = "❌ Error en el WebSocket. Revisa tu terminal de Python.";
+                btnTest.disabled = false;
+            };
+        }
+    </script>
+</body>
+
+</html>
