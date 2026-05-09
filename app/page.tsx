@@ -1,18 +1,26 @@
-import { Mic, Zap, Cpu, Monitor, Play } from "lucide-react";
+import { Mic, Zap, Cpu, Monitor, Play, ArrowRight } from "lucide-react";
 import HardwareScene from "@/components/landing/HardwareScene";
+import Link from "next/link";
 
 export default function Home() {
   return (
     <div className="bg-white min-h-screen font-sans text-zinc-900 pb-24">
       {/* Hero Section */}
       <section className="flex flex-col items-center justify-center px-6 pt-24 text-center min-h-screen relative">
-        <div className="relative z-10 pointer-events-none">
-          <h1 className="text-6xl sm:text-7xl md:text-8xl font-semibold tracking-tighter text-zinc-900 mb-6">
+        <div className="relative z-10">
+          <h1 className="text-6xl sm:text-7xl md:text-8xl font-semibold tracking-tighter text-zinc-900 mb-6 pointer-events-none">
             Tu Música.<br className="hidden sm:block" /> Su Emoción.
           </h1>
-          <p className="text-xl md:text-2xl text-zinc-500 max-w-2xl mx-auto font-normal tracking-tight">
+          <p className="text-xl md:text-2xl text-zinc-500 max-w-2xl mx-auto font-normal tracking-tight mb-12 pointer-events-none">
             El Robot que Siente el Ritmo
           </p>
+          <Link 
+            href="/dashboard"
+            className="inline-flex items-center gap-2 bg-zinc-900 text-white px-8 py-4 rounded-full font-medium text-lg hover:bg-zinc-800 transition-transform hover:scale-105 active:scale-95"
+          >
+            Get Started
+            <ArrowRight className="w-5 h-5" />
+          </Link>
         </div>
 
       </section>
@@ -133,6 +141,33 @@ export default function Home() {
           </p>
           <div className="bg-zinc-50 rounded-[32px] border border-zinc-200 overflow-hidden">
             <HardwareScene />
+          </div>
+        </div>
+
+        {/* Assembly Procedure Section */}
+        <div className="mt-32 pb-32">
+          <h2 className="text-3xl md:text-4xl font-medium tracking-tight mb-8 text-zinc-800 text-center">
+            Procedimiento de Armado
+          </h2>
+          <div className="max-w-3xl mx-auto space-y-8 text-zinc-600 text-lg leading-relaxed">
+            <div className="bg-zinc-50 p-8 rounded-3xl border border-zinc-100">
+              <h3 className="text-xl font-semibold text-zinc-900 mb-4">Paso 1. Conexiones Base</h3>
+              <p>
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+              </p>
+            </div>
+            <div className="bg-zinc-50 p-8 rounded-3xl border border-zinc-100">
+              <h3 className="text-xl font-semibold text-zinc-900 mb-4">Paso 2. Ensamblaje Físico</h3>
+              <p>
+                Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+              </p>
+            </div>
+            <div className="bg-zinc-50 p-8 rounded-3xl border border-zinc-100">
+              <h3 className="text-xl font-semibold text-zinc-900 mb-4">Paso 3. Calibración</h3>
+              <p>
+                Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
+              </p>
+            </div>
           </div>
         </div>
 
