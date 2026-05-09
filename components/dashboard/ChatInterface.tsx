@@ -1,52 +1,41 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Mic, Loader2, Video } from "lucide-react";
+import { useRef, useEffect } from "react";
+import { Send, Bot, User, Mic, Loader2 } from "lucide-react";
+import { useState } from "react";
+import type { CaptureStatus } from "@/lib/useAudioCapture";
 
 interface ChatInterfaceProps {
-  onBotResponse?: (response: any) => void;
+  messages: { role: string; text: string }[];
+  onSendMessage: (text: string) => void;
+  onListen: () => void;
+  isProcessing: boolean;
+  audioStatus: CaptureStatus;
+  secondsLeft: number;
 }
 
-export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState([
-
-    { role: "bot", text: "¡Hola! Estoy listo para escuchar la música y detectar tus emociones. Por favor asegúrate de dar permisos de cámara y micrófono." }
-  ]);
+export default function ChatInterface({
+  messages,
+  onSendMessage,
+  onListen,
+  isProcessing,
+  audioStatus,
+  secondsLeft,
+}: ChatInterfaceProps) {
   const [input, setInput] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [status, setStatus] = useState("Iniciando hardware...");
-  
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Inicializar cámara/micrófono
+  // Auto-scroll al último mensaje
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setStatus("Sistema listo");
-      })
-      .catch(err => {
-        console.error("Error media:", err);
-        setStatus("Error: Sin acceso a cámara/micrófono");
-      });
-
-    return () => {
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    };
-  }, []);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isRecording) return;
-
-    const userMessage = input;
-    setMessages([...messages, { role: "user", text: userMessage }]);
+    if (!input.trim() || isProcessing) return;
+    onSendMessage(input);
     setInput("");
-    
+
     if (!streamRef.current || !videoRef.current) {
       setMessages(prev => [...prev, { role: "bot", text: "⚠️ Error: No hay acceso a la cámara o el micrófono." }]);
       return;
@@ -65,19 +54,19 @@ export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
     // 2. Grabar Audio (5 segundos)
     const mediaRecorder = new MediaRecorder(streamRef.current);
     const audioChunks: BlobPart[] = [];
-    
+
     mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    
+
     mediaRecorder.onstop = () => {
       setStatus("Enviando a Gemini AI...");
       const reader = new FileReader();
       reader.readAsDataURL(new Blob(audioChunks, { type: "audio/webm" }));
       reader.onloadend = () => {
         const audioB64Clean = (reader.result as string).split(",")[1];
-        
+
         // 3. Conectar a FastAPI WebSocket
         const ws = new WebSocket("ws://127.0.0.1:8000/ws/chat");
-        
+
         ws.onopen = () => {
           ws.send(JSON.stringify({
             message: userMessage,
@@ -88,16 +77,16 @@ export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
 
         ws.onmessage = (event) => {
           const response = JSON.parse(event.data);
-          
+
           setMessages(prev => [
             ...prev,
             { role: "bot", text: response.bot_message || "¡He procesado tu energía exitosamente!" }
           ]);
-          
+
           if (onBotResponse) {
             onBotResponse(response);
           }
-          
+
           setStatus(`Emoción detectada: ${response.emotion?.toUpperCase()}`);
           setIsRecording(false);
           ws.close();
@@ -134,17 +123,17 @@ export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
             </p>
           </div>
         </div>
-        
+
         {/* Minicamara para validación visual silenciosa */}
         <div className="relative">
-           <video 
-             ref={videoRef} 
-             autoPlay 
-             muted 
-             playsInline
-             className="w-16 h-16 rounded-xl object-cover bg-zinc-200 border border-zinc-300"
-           />
-           {isRecording && <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            className="w-16 h-16 rounded-xl object-cover bg-zinc-200 border border-zinc-300"
+          />
+          {isRecording && <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
         </div>
       </div>
 
@@ -152,39 +141,77 @@ export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
       <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-zinc-50/30">
         {messages.map((msg, i) => (
           <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === "user" ? "bg-blue-100 text-blue-600" : "bg-zinc-200 text-zinc-600"}`}>
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === "user" ? "bg-blue-100 text-blue-600" : "bg-zinc-200 text-zinc-600"
+                }`}
+            >
               {msg.role === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
             </div>
-            <div className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm ${msg.role === "user" ? "bg-zinc-900 text-white rounded-tr-sm" : "bg-white border border-zinc-200 text-zinc-700 rounded-tl-sm shadow-sm"}`}>
+            <div
+              className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm ${msg.role === "user"
+                  ? "bg-zinc-900 text-white rounded-tr-sm"
+                  : "bg-white border border-zinc-200 text-zinc-700 rounded-tl-sm shadow-sm"
+                }`}
+            >
               {msg.text}
             </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
       <div className="p-4 bg-white border-t border-zinc-100">
-        <form onSubmit={handleSend} className="relative flex items-center">
-          <input 
-            type="text" 
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={isRecording}
-            placeholder={isRecording ? "Capturando cámara y micrófono..." : "Escribe un mensaje al robot..."}
-            className="w-full pl-6 pr-14 py-4 bg-zinc-50 border border-zinc-200 rounded-full focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-all disabled:opacity-60"
-          />
-          <button 
-            type="submit"
-            disabled={!input.trim() || isRecording}
-            className={`absolute right-2 p-2 rounded-full transition-colors ${
-              isRecording 
-                ? "bg-red-100 text-red-500" 
-                : "bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900"
-            }`}
+        <div className="flex items-center gap-2">
+          {/* Botón de Escuchar */}
+          <button
+            type="button"
+            onClick={onListen}
+            disabled={audioStatus !== "idle" || isProcessing}
+            className={`shrink-0 flex items-center gap-2 px-4 py-3 rounded-full font-medium text-sm transition-all ${audioStatus === "recording"
+                ? "bg-red-500 text-white animate-pulse"
+                : audioStatus === "processing"
+                  ? "bg-yellow-500 text-white"
+                  : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+              } disabled:opacity-50`}
           >
-            {isRecording ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {audioStatus === "recording" ? (
+              <>
+                <Mic className="w-4 h-4" />
+                {secondsLeft}s
+              </>
+            ) : audioStatus === "processing" ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Analizando
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4" />
+                Escuchar
+              </>
+            )}
           </button>
-        </form>
+
+          {/* Input de texto */}
+          <form onSubmit={handleSend} className="relative flex-1 flex items-center">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Escribe un mensaje..."
+              disabled={isProcessing}
+              className="w-full pl-5 pr-12 py-3 bg-zinc-50 border border-zinc-200 rounded-full focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-all disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || isProcessing}
+              className="absolute right-2 p-2 bg-zinc-900 text-white rounded-full hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900 transition-colors"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

@@ -3,16 +3,14 @@
 import { Disc3, Music2, Quote } from "lucide-react";
 
 interface MusicPlayerCardProps {
-  songRecommendation?: string;
-  emotion?: string;
+  songName: string | null;
+  artistName: string | null;
+  currentLyric: string | null;
 }
 
-export default function MusicPlayerCard({ songRecommendation, emotion }: MusicPlayerCardProps) {
-  // Parsing simple de la recomendación de Gemini
-  // Si Gemini devuelve "Canción - Artista", lo separamos, si no, mostramos todo.
-  const isDummy = !songRecommendation;
-  const displayTitle = songRecommendation || "Esperando lectura...";
-  
+export default function MusicPlayerCard({ songName, artistName, currentLyric }: MusicPlayerCardProps) {
+  const isPlaying = !!songName;
+
   return (
     <div className="bg-white border border-zinc-200 rounded-[32px] p-6 shadow-sm flex flex-col gap-6 relative overflow-hidden">
       {/* Elemento de fondo sutil */}
@@ -21,8 +19,11 @@ export default function MusicPlayerCard({ songRecommendation, emotion }: MusicPl
       </div>
 
       <div className="flex items-center gap-4 relative z-10">
-        <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center shrink-0">
-          <Disc3 className={`w-8 h-8 text-zinc-400 ${!isDummy ? "animate-[spin_4s_linear_infinite] text-blue-500" : ""}`} />
+        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 ${isPlaying ? "bg-blue-50" : "bg-zinc-100"}`}>
+          <Disc3
+            className={`w-8 h-8 ${isPlaying ? "text-blue-500 animate-[spin_4s_linear_infinite]" : "text-zinc-300"
+              }`}
+          />
         </div>
         <div>
           <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">
@@ -36,14 +37,37 @@ export default function MusicPlayerCard({ songRecommendation, emotion }: MusicPl
               Mood: {emotion}
             </p>
           )}
+          <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">
+            {isPlaying ? "Now Playing" : "Esperando..."}
+          </p>
+          <h3 className="font-semibold text-zinc-900 text-lg leading-tight">
+            {songName || "Sin canción"}
+          </h3>
+          <p className="text-sm text-zinc-500">{artistName || "Presiona Escuchar"}</p>
         </div>
       </div>
 
+      {currentLyric && (
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
+          <Quote className="w-4 h-4 text-zinc-300 mb-2" />
+          <p className="text-zinc-700 italic text-sm leading-relaxed">
+            &ldquo;{currentLyric}&rdquo;
+          </p>
+        </div>
+      )}
+
+      {!currentLyric && !isPlaying && (
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
+          <p className="text-zinc-400 text-sm text-center">
+            Graba audio para detectar la canción y sus lyrics
+          </p>
+        </div>
+      )}
       <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
         <Quote className="w-4 h-4 text-zinc-300 mb-2" />
         <p className="text-zinc-700 italic text-sm leading-relaxed">
-          {isDummy 
-            ? "Envíale un mensaje a EmotiBot para que escuche tu entorno y te recomiende algo." 
+          {isDummy
+            ? "Envíale un mensaje a EmotiBot para que escuche tu entorno y te recomiende algo."
             : "¡Esta es la canción perfecta para el ambiente y la vibra que acabo de analizar en tu rostro y entorno!"}
         </p>
       </div>
