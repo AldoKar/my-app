@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tasklist)",
+      "Bash(python3 -m uvicorn main:app --reload --port 8000)",
+      "Bash(python -m uvicorn main:app --reload --port 8000)",
+      "Bash(curl http://127.0.0.1:8000/health)",
+      "Bash(python *)"
+    ]
+  }
+}

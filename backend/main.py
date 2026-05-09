@@ -9,12 +9,12 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
-load_dotenv()
+load_dotenv("backend/.env")
 
 # Configurar Gemini
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
-    print("⚠️ ADVERTENCIA: GEMINI_API_KEY no encontrada en el archivo .env")
+    print("[WARN] ADVERTENCIA: GEMINI_API_KEY no encontrada en el archivo .env")
 genai.configure(api_key=api_key)
 
 app = FastAPI(title="RhythmBot Multimodal API")
@@ -54,7 +54,7 @@ async def health_check():
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("🟢 Cliente Frontend conectado al WebSocket")
+    print("[OK] Cliente Frontend conectado al WebSocket")
     
     # Inicializar el modelo con instrucciones claras
     model = genai.GenerativeModel(
@@ -74,9 +74,13 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             payload = json.loads(data)
             
-            user_text = payload.get("message", "")
+            user_text = payload.get("message")
             image_b64 = payload.get("image_b64")
             audio_b64 = payload.get("audio_b64")
+            
+            print(f"[INFO] Recibido mensaje: {user_text}")
+            if image_b64: print(f"[INFO] Imagen recibida ({len(image_b64)} bytes)")
+            if audio_b64: print(f"[INFO] Audio recibido ({len(audio_b64)} bytes)")
             
             # 2. Armar los "parts" (el contenido multimodal) para Gemini
             prompt_parts = []
@@ -84,22 +88,30 @@ async def websocket_endpoint(websocket: WebSocket):
                 prompt_parts.append(user_text)
                 
             if image_b64:
-                # Decodificar base64 a bytes
-                image_bytes = base64.b64decode(image_b64)
-                prompt_parts.append({"mime_type": "image/jpeg", "data": image_bytes})
+                try:
+                    # Decodificar base64 a bytes
+                    image_bytes = base64.b64decode(image_b64)
+                    prompt_parts.append({"mime_type": "image/jpeg", "data": image_bytes})
+                except Exception as e:
+                    print(f"[ERROR] Error decodificando imagen: {e}")
                 
             if audio_b64:
-                audio_bytes = base64.b64decode(audio_b64)
-                # Asumimos webm porque es lo estándar al grabar desde el navegador web
-                prompt_parts.append({"mime_type": "audio/webm", "data": audio_bytes})
+                try:
+                    audio_bytes = base64.b64decode(audio_b64)
+                    # Asumimos webm porque es lo estándar al grabar desde el navegador web
+                    prompt_parts.append({"mime_type": "audio/webm", "data": audio_bytes})
+                except Exception as e:
+                    print(f"[ERROR] Error decodificando audio: {e}")
 
             # Si no enviaron nada, saltar
             if not prompt_parts:
+                print("[WARN] No se recibieron partes para el prompt")
                 await websocket.send_json({"error": "No data received"})
                 continue
 
             try:
                 # 3. Llamar a Gemini (async para no bloquear)
+                print("[INFO] Llamando a Gemini...")
                 response = await asyncio.to_thread(
                     model.generate_content,
                     prompt_parts,
@@ -111,14 +123,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 
                 # 4. Enviar el JSON perfecto al frontend
+                print(f"[OK] Respuesta de Gemini recibida: {response.text}")
                 json_response = json.loads(response.text)
                 await websocket.send_json(json_response)
                 
             except Exception as e:
-                print(f"⚠️ Error de Gemini: {e}")
+                print(f"[WARN] Error de Gemini: {e}")
+                import traceback
+                traceback.print_exc()
                 await websocket.send_json(FALLBACK_RESPONSE)
                 
     except WebSocketDisconnect:
-        print("🔌 Cliente desconectado")
+        print("[DISCONNECT] Cliente desconectado")
     except Exception as e:
-        print(f"🛑 Error crítico: {e}")
+        print(f"[ERROR] Error critico: {e}")

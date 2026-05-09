@@ -1,10 +1,25 @@
+"use client";
+
 import ChatInterface from "@/components/dashboard/ChatInterface";
 import RobotStatusCard from "@/components/dashboard/RobotStatusCard";
 import MusicPlayerCard from "@/components/dashboard/MusicPlayerCard";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { useState } from "react";
 
 export default function Dashboard() {
+  const [songRecommendation, setSongRecommendation] = useState<string>("");
+  const [emotion, setEmotion] = useState<string>("");
+
+  const handleBotResponse = (response: any) => {
+    if (response.song_recommendation) {
+      setSongRecommendation(response.song_recommendation);
+    }
+    if (response.emotion) {
+      setEmotion(response.emotion);
+    }
+  };
+
   return (
     <div className="bg-zinc-50 min-h-screen font-sans text-zinc-900 pb-24">
       {/* Navbar Minimalista */}
@@ -26,7 +41,7 @@ export default function Dashboard() {
             <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">
               Conversación
             </h2>
-            <ChatInterface />
+            <ChatInterface onBotResponse={handleBotResponse} />
           </div>
 
           {/* Columna Derecha: Tarjetas de Estado e Info */}
@@ -39,7 +54,7 @@ export default function Dashboard() {
             <RobotStatusCard />
 
             {/* Music Info */}
-            <MusicPlayerCard />
+            <MusicPlayerCard songRecommendation={songRecommendation} emotion={emotion} />
           </div>
 
         </div>

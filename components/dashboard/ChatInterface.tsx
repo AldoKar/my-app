@@ -1,42 +1,150 @@
 "use client";
 
-import { useState } from "react";
-import { Send, Bot, User } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Send, Bot, User, Mic, Loader2, Video } from "lucide-react";
 
-export default function ChatInterface() {
+interface ChatInterfaceProps {
+  onBotResponse?: (response: any) => void;
+}
+
+export default function ChatInterface({ onBotResponse }: ChatInterfaceProps) {
   const [messages, setMessages] = useState([
-    { role: "bot", text: "¡Hola! Estoy listo para escuchar la música y detectar las emociones. Conecta el robot para empezar." }
+
+    { role: "bot", text: "¡Hola! Estoy listo para escuchar la música y detectar tus emociones. Por favor asegúrate de dar permisos de cámara y micrófono." }
   ]);
   const [input, setInput] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [status, setStatus] = useState("Iniciando hardware...");
+  
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Inicializar cámara/micrófono
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => {
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setStatus("Sistema listo");
+      })
+      .catch(err => {
+        console.error("Error media:", err);
+        setStatus("Error: Sin acceso a cámara/micrófono");
+      });
+
+    return () => {
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() || isRecording) return;
 
-    setMessages([...messages, { role: "user", text: input }]);
+    const userMessage = input;
+    setMessages([...messages, { role: "user", text: userMessage }]);
     setInput("");
     
-    // Simulate bot response after a short delay
+    if (!streamRef.current || !videoRef.current) {
+      setMessages(prev => [...prev, { role: "bot", text: "⚠️ Error: No hay acceso a la cámara o el micrófono." }]);
+      return;
+    }
+
+    setIsRecording(true);
+    setStatus("Grabando tu vibra (5s)...");
+
+    // 1. Capturar Foto (Canvas)
+    const canvas = document.createElement("canvas");
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext("2d")?.drawImage(videoRef.current, 0, 0);
+    const imageB64Clean = canvas.toDataURL("image/jpeg", 0.5).split(",")[1];
+
+    // 2. Grabar Audio (5 segundos)
+    const mediaRecorder = new MediaRecorder(streamRef.current);
+    const audioChunks: BlobPart[] = [];
+    
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    
+    mediaRecorder.onstop = () => {
+      setStatus("Enviando a Gemini AI...");
+      const reader = new FileReader();
+      reader.readAsDataURL(new Blob(audioChunks, { type: "audio/webm" }));
+      reader.onloadend = () => {
+        const audioB64Clean = (reader.result as string).split(",")[1];
+        
+        // 3. Conectar a FastAPI WebSocket
+        const ws = new WebSocket("ws://127.0.0.1:8000/ws/chat");
+        
+        ws.onopen = () => {
+          ws.send(JSON.stringify({
+            message: userMessage,
+            image_b64: imageB64Clean,
+            audio_b64: audioB64Clean
+          }));
+        };
+
+        ws.onmessage = (event) => {
+          const response = JSON.parse(event.data);
+          
+          setMessages(prev => [
+            ...prev,
+            { role: "bot", text: response.bot_message || "¡He procesado tu energía exitosamente!" }
+          ]);
+          
+          if (onBotResponse) {
+            onBotResponse(response);
+          }
+          
+          setStatus(`Emoción detectada: ${response.emotion?.toUpperCase()}`);
+          setIsRecording(false);
+          ws.close();
+        };
+
+        ws.onerror = () => {
+          setMessages(prev => [...prev, { role: "bot", text: "❌ Error de conexión con el backend de IA." }]);
+          setStatus("Fallo de conexión");
+          setIsRecording(false);
+        };
+      };
+    };
+
+    mediaRecorder.start();
+    // Detener la grabación exactamente a los 5 segundos
     setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        { role: "bot", text: "Aún no tengo un modelo de IA conectado para responder, pero sigo analizando el audio." }
-      ]);
-    }, 1000);
+      mediaRecorder.stop();
+    }, 5000);
   };
 
   return (
     <div className="flex flex-col h-[600px] bg-white border border-zinc-200 rounded-[32px] overflow-hidden shadow-sm">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-zinc-100 flex items-center gap-3 bg-zinc-50/50">
-        <div className="w-10 h-10 bg-zinc-900 rounded-full flex items-center justify-center text-white">
-          <Bot className="w-5 h-5" />
+      <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-zinc-900 rounded-full flex items-center justify-center text-white relative">
+            <Bot className="w-5 h-5" />
+            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white"></span>
+          </div>
+          <div>
+            <h2 className="font-semibold text-zinc-900">RhythmBot Assistant</h2>
+            <p className="text-xs text-zinc-500 flex items-center gap-1">
+              {isRecording ? <span className="text-red-500 font-medium animate-pulse">Grabando...</span> : status}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="font-semibold text-zinc-900">EmotiBot Assistant</h2>
-          <p className="text-xs text-zinc-500 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Online
-          </p>
+        
+        {/* Minicamara para validación visual silenciosa */}
+        <div className="relative">
+           <video 
+             ref={videoRef} 
+             autoPlay 
+             muted 
+             playsInline
+             className="w-16 h-16 rounded-xl object-cover bg-zinc-200 border border-zinc-300"
+           />
+           {isRecording && <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
         </div>
       </div>
 
@@ -61,15 +169,20 @@ export default function ChatInterface() {
             type="text" 
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribe un mensaje al robot..."
-            className="w-full pl-6 pr-14 py-4 bg-zinc-50 border border-zinc-200 rounded-full focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-all"
+            disabled={isRecording}
+            placeholder={isRecording ? "Capturando cámara y micrófono..." : "Escribe un mensaje al robot..."}
+            className="w-full pl-6 pr-14 py-4 bg-zinc-50 border border-zinc-200 rounded-full focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent transition-all disabled:opacity-60"
           />
           <button 
             type="submit"
-            disabled={!input.trim()}
-            className="absolute right-2 p-2 bg-zinc-900 text-white rounded-full hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900 transition-colors"
+            disabled={!input.trim() || isRecording}
+            className={`absolute right-2 p-2 rounded-full transition-colors ${
+              isRecording 
+                ? "bg-red-100 text-red-500" 
+                : "bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-zinc-900"
+            }`}
           >
-            <Send className="w-4 h-4" />
+            {isRecording ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </form>
       </div>
