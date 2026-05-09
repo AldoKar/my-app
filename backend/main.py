@@ -31,7 +31,12 @@ ACRCLOUD_HOST = os.environ.get("ACRCLOUD_HOST", "identify-us-west-2.acrcloud.com
 ACRCLOUD_ACCESS_KEY = os.environ.get("ACRCLOUD_ACCESS_KEY", "")
 ACRCLOUD_ACCESS_SECRET = os.environ.get("ACRCLOUD_ACCESS_SECRET", "")
 
-app = FastAPI(title="RhythmBot API")
+# Spotify API (client credentials)
+SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+_spotify_token_cache: dict[str, object] = {"access_token": None, "expires_at": 0.0}
+
+app = FastAPI(title="Vybo API")
 
 # Configuración de CORS
 app.add_middleware(
@@ -51,6 +56,10 @@ class AnalyzeRequest(BaseModel):
     audio_b64: str | None = None
     video_b64: str | None = None
 
+
+class TTSRequest(BaseModel):
+    text: str = ""
+
 class RhythmBotResponse(BaseModel):
     emotion: str = Field(description="Must be one of: energetic, calm, sad, happy, tense, neutral")
     mood_command: str = Field(description="ESP32 serial command. Must be one of: 'mood happy', 'mood sad', 'mood surprised', 'mood wink', 'mood neutral'")
@@ -58,6 +67,8 @@ class RhythmBotResponse(BaseModel):
     display_text: str = Field(description="Texto corto en español (max 20 chars) para mostrar en la pantalla OLED. Si hay cancion detectada, pon un verso corto favorito de la letra.")
     bot_message: str = Field(description="A friendly, empathetic chat message in Spanish responding to the music vibe")
     screen_color: str = Field(description="Hex color code representing the mood")
+    recommended_song: str | None = Field(description="Recommended song title if no song was detected")
+    recommended_artist: str | None = Field(description="Recommended artist if no song was detected")
 
 FALLBACK_RESPONSE = {
     "emotion": "neutral",
@@ -69,6 +80,8 @@ FALLBACK_RESPONSE = {
     "detected_song": None,
     "detected_artist": None,
     "current_lyric": None,
+    "recommended_song": None,
+    "recommended_artist": None,
 }
 
 
@@ -181,7 +194,88 @@ async def get_synced_lyric(title: str, artist: str, offset_ms: int) -> str | Non
 # ---------------------------------------------------------
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "message": "RhythmBot Backend is alive!"}
+    return {"status": "ok", "message": "Vybo Backend is alive!"}
+
+
+async def _get_spotify_access_token() -> str | None:
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return None
+
+    now = time.time()
+    cached_token = _spotify_token_cache.get("access_token")
+    cached_expires = float(_spotify_token_cache.get("expires_at", 0))
+    if cached_token and cached_expires - now > 30:
+        return str(cached_token)
+
+    auth_header = base64.b64encode(
+        f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode("utf-8")
+    ).decode("utf-8")
+
+    async with httpx.AsyncClient(timeout=6) as client:
+        resp = await client.post(
+            "https://accounts.spotify.com/api/token",
+            data={"grant_type": "client_credentials"},
+            headers={"Authorization": f"Basic {auth_header}"},
+        )
+
+    if resp.status_code != 200:
+        print(f"⚠️ Spotify token error: {resp.status_code} {resp.text}")
+        return None
+
+    payload = resp.json()
+    access_token = payload.get("access_token")
+    expires_in = int(payload.get("expires_in", 0))
+    if not access_token:
+        return None
+
+    _spotify_token_cache["access_token"] = access_token
+    _spotify_token_cache["expires_at"] = now + expires_in
+    return access_token
+
+
+@app.get("/api/spotify/search")
+async def spotify_search(song: str | None = None, artist: str | None = None, query: str | None = None):
+    token = await _get_spotify_access_token()
+    if not token:
+        return {"track_id": None, "embed_url": None, "error": "spotify_not_configured"}
+
+    if query:
+        search_query = query
+    else:
+        parts = []
+        if song:
+            parts.append(f"track:{song}")
+        if artist:
+            parts.append(f"artist:{artist}")
+        search_query = " ".join(parts).strip()
+
+    if not search_query:
+        return {"track_id": None, "embed_url": None, "error": "missing_query"}
+
+    async with httpx.AsyncClient(timeout=6) as client:
+        resp = await client.get(
+            "https://api.spotify.com/v1/search",
+            params={"q": search_query, "type": "track", "limit": 1},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    if resp.status_code != 200:
+        print(f"⚠️ Spotify search error: {resp.status_code} {resp.text}")
+        return {"track_id": None, "embed_url": None, "error": "search_failed"}
+
+    payload = resp.json()
+    items = payload.get("tracks", {}).get("items", [])
+    if not items:
+        return {"track_id": None, "embed_url": None, "error": "no_results"}
+
+    track_id = items[0].get("id")
+    if not track_id:
+        return {"track_id": None, "embed_url": None, "error": "no_track_id"}
+
+    return {
+        "track_id": track_id,
+        "embed_url": f"https://open.spotify.com/embed/track/{track_id}",
+    }
 
 
 @app.post("/api/analyze")
@@ -194,7 +288,7 @@ async def analyze(req: AnalyzeRequest):
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
         system_instruction=(
-            "Eres RhythmBot, un robot físico con pantalla OLED que muestra expresiones faciales "
+            "Eres Vybo, un robot físico con pantalla OLED que muestra expresiones faciales "
             "y servomotores que mueven su cabeza. Tu trabajo es analizar canciones y sus letras "
             "para decidir qué emoción expresar físicamente.\n\n"
             "REGLAS IMPORTANTES:\n"
@@ -207,7 +301,8 @@ async def analyze(req: AnalyzeRequest):
             "- NO uses acentos ni caracteres especiales (ñ, ¿, ¡, tildes) en display_text, ya que la pantalla OLED no los soporta. Reemplaza letras acentuadas por su version sin acento.\n"
             "- En bot_message, actua como mi mejor amigo. No des respuestas roboticas ni digas 'pensando'. Se muy conversador! Si detectaste una cancion, banda o letra, CUENTAME UN DATO CURIOSO (fun fact) fascinante sobre la banda, la cancion o su contexto historico. Habla en español de forma super natural y relajada.\n"
             "- Elige emociones vibrantes, no seas conservador. Si la cancion es alegre, pon 'mood happy'.\n"
-            "- IMPORTANTE: Si recibes un video, evalua la expresion facial y lenguaje corporal del usuario. Menciona en bot_message lo que ves en el video y usa eso para ajustar el mood."
+            "- IMPORTANTE: Si recibes un video, evalua la expresion facial y lenguaje corporal del usuario. Menciona en bot_message lo que ves en el video y usa eso para ajustar el mood.\n"
+            "- Si NO se detecta cancion en el audio, recomienda una cancion y artista en los campos recommended_song y recommended_artist. Si SI se detecta cancion, deja recommended_song y recommended_artist como null."
         ),
     )
 
@@ -303,6 +398,12 @@ async def analyze(req: AnalyzeRequest):
         json_response["detected_song"] = detected_song
         json_response["detected_artist"] = detected_artist
         json_response["current_lyric"] = current_lyric
+        if detected_song:
+            json_response["recommended_song"] = None
+            json_response["recommended_artist"] = None
+        else:
+            json_response["recommended_song"] = json_response.get("recommended_song") or None
+            json_response["recommended_artist"] = json_response.get("recommended_artist") or None
 
         print(f"✅ {json_response.get('emotion')} → {json_response.get('mood_command')}")
         return json_response
@@ -314,6 +415,8 @@ async def analyze(req: AnalyzeRequest):
         fallback["detected_song"] = detected_song
         fallback["detected_artist"] = detected_artist
         fallback["current_lyric"] = current_lyric
+        fallback["recommended_song"] = None
+        fallback["recommended_artist"] = None
         return fallback
     finally:
         # Limpieza de archivos de video
@@ -329,6 +432,46 @@ async def analyze(req: AnalyzeRequest):
             except Exception:
                 pass
 
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    if not req.text.strip():
+        return {"audio_base64": None, "error": "missing_text"}
+
+    try:
+        tts_model = genai.GenerativeModel(model_name="gemini-3.1-flash-tts-preview")
+        response = await asyncio.to_thread(
+            tts_model.generate_content,
+            [
+                "Habla en espanol con energia altisima, muy amigable y carismatica, "
+                "como un DJ super alegre que contagia vibra. "
+                f"Mensaje: {req.text}"
+            ],
+            generation_config=genai.GenerationConfig(
+                response_modalities=["AUDIO"],
+                speech_config={
+                    "voice_config": {
+                        "prebuilt_voice_config": {"voice_name": "Puck"}
+                    }
+                },
+            ),
+        )
+
+        audio_part = None
+        if response.candidates:
+            content = response.candidates[0].content
+            if content and content.parts:
+                audio_part = content.parts[0]
+
+        audio_data = getattr(getattr(audio_part, "inline_data", None), "data", None)
+        if not audio_data:
+            return {"audio_base64": None, "error": "no_audio"}
+
+        return {"audio_base64": audio_data}
+    except Exception as e:
+        print(f"⚠️ Error de TTS: {e}")
+        return {"audio_base64": None, "error": "tts_failed"}
+
 # ---------------------------------------------------------
 # WEBSOCKET ENDPOINT
 # ---------------------------------------------------------
@@ -340,8 +483,8 @@ async def websocket_endpoint(websocket: WebSocket):
     model = genai.GenerativeModel(
         model_name="gemini-1.5-flash",
         system_instruction=(
-            "Eres RhythmBot, un robot físico con pantalla OLED que muestra expresiones faciales "
-            "y servomotores que mueven su cabeza. Tu trabajo es analizar canciones y sus letras "
+            "Eres Vybo, un robot físico con pantalla OLED que muestra expresiones faciales "
+                "y servomotores que mueven su cabeza. Tu trabajo es analizar canciones y sus letras "
             "para decidir qué emoción expresar físicamente.\n\n"
             "REGLAS IMPORTANTES:\n"
             "- mood_command DEBE ser exactamente uno de: 'mood happy', 'mood sad', 'mood surprised', 'mood wink', 'mood neutral'\n"

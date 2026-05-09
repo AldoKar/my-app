@@ -18,7 +18,7 @@ const newsreader = Newsreader({
 });
 
 export const metadata: Metadata = {
-  title: "EmotiBot — El Robot que Siente el Ritmo",
+  title: "Vybo — El Robot que Siente el Ritmo",
   description:
     "Un cerebro robótico emocional impulsado por ESP32 y pantalla OLED que escucha la música del entorno, identifica la canción y muestra expresiones faciales en tiempo real vía Web Serial API.",
 };

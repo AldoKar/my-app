@@ -1,0 +1,12 @@
+{
+  "name": "GrooveEye DJ",
+  "description": "An AI-powered DJ with a witty personality that uses your webcam to sense your vibe and curate the perfect Spotify playlists.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "AI-powered recommendations",
+    "Real-time mood analysis",
+    "Spotify integration"
+  ]
+}

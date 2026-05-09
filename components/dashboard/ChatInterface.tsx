@@ -23,14 +23,15 @@ export default function ChatInterface({
 
   // Solicitar permisos de cámara/micrófono al cargar
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((stream) => {
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       })
-      .catch(err => {
+      .catch((err) => {
         console.error("Error accessing media devices.", err);
         setStatus("Sin camara/microfono");
       });
@@ -50,7 +51,7 @@ export default function ChatInterface({
 
     // Countdown visual
     const countdownInterval = setInterval(() => {
-      setCountdown(prev => {
+      setCountdown((prev) => {
         if (prev <= 1) {
           clearInterval(countdownInterval);
           return 0;
@@ -60,18 +61,22 @@ export default function ChatInterface({
     }, 1000);
 
     // Grabar video (incluye audio)
-    const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: "video/webm" });
+    const mediaRecorder = new MediaRecorder(streamRef.current, {
+      mimeType: "video/webm",
+    });
     const videoChunks: BlobPart[] = [];
 
     // Grabar audio por separado para ACRCloud
     const audioStream = new MediaStream(streamRef.current.getAudioTracks());
-    const audioRecorder = new MediaRecorder(audioStream, { mimeType: "audio/webm" });
+    const audioRecorder = new MediaRecorder(audioStream, {
+      mimeType: "audio/webm",
+    });
     const audioChunks: BlobPart[] = [];
 
-    mediaRecorder.ondataavailable = e => {
+    mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) videoChunks.push(e.data);
     };
-    audioRecorder.ondataavailable = e => {
+    audioRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
     };
 
@@ -86,7 +91,9 @@ export default function ChatInterface({
 
         // Convertir audio a Base64
         const audioReader = new FileReader();
-        audioReader.readAsDataURL(new Blob(audioChunks, { type: "audio/webm" }));
+        audioReader.readAsDataURL(
+          new Blob(audioChunks, { type: "audio/webm" }),
+        );
         audioReader.onloadend = () => {
           const audioB64 = (audioReader.result as string).split(",")[1];
           setIsRecording(false);
@@ -115,9 +122,15 @@ export default function ChatInterface({
             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white"></span>
           </div>
           <div>
-            <h2 className="font-semibold text-zinc-900">RhythmBot Assistant</h2>
+            <h2 className="font-semibold text-zinc-900">Vybo Assistant</h2>
             <p className="text-xs text-zinc-500 flex items-center gap-1">
-              {isRecording ? <span className="text-red-500 font-medium animate-pulse">Grabando... {countdown}s</span> : status}
+              {isRecording ? (
+                <span className="text-red-500 font-medium animate-pulse">
+                  Grabando... {countdown}s
+                </span>
+              ) : (
+                status
+              )}
             </p>
           </div>
         </div>
@@ -131,25 +144,38 @@ export default function ChatInterface({
             playsInline
             className="w-16 h-16 rounded-xl object-cover bg-zinc-200 border border-zinc-300"
           />
-          {isRecording && <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>}
+          {isRecording && (
+            <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+          )}
         </div>
       </div>
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-zinc-50/30">
         {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+          <div
+            key={i}
+            className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+          >
             <div
-              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === "user" ? "bg-blue-100 text-blue-600" : "bg-zinc-200 text-zinc-600"
-                }`}
+              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                msg.role === "user"
+                  ? "bg-blue-100 text-blue-600"
+                  : "bg-zinc-200 text-zinc-600"
+              }`}
             >
-              {msg.role === "user" ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              {msg.role === "user" ? (
+                <User className="w-4 h-4" />
+              ) : (
+                <Bot className="w-4 h-4" />
+              )}
             </div>
             <div
-              className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm ${msg.role === "user"
+              className={`px-4 py-3 rounded-2xl max-w-[80%] text-sm ${
+                msg.role === "user"
                   ? "bg-zinc-900 text-white rounded-tr-sm"
                   : "bg-white border border-zinc-200 text-zinc-700 rounded-tl-sm shadow-sm"
-                }`}
+              }`}
             >
               {msg.text}
             </div>

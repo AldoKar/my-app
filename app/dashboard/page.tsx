@@ -14,6 +14,7 @@ export interface SongInfo {
   artist: string | null;
   lyric: string | null;
   emotion: string | null;
+  source: "detected" | "recommended" | null;
 }
 
 export interface BotResponse {
@@ -26,14 +27,25 @@ export interface BotResponse {
   detected_song: string | null;
   detected_artist: string | null;
   current_lyric: string | null;
+  recommended_song?: string | null;
+  recommended_artist?: string | null;
 }
 
 export default function Dashboard() {
   // Estado compartido
   const serial = useSerialPort();
-  const [songInfo, setSongInfo] = useState<SongInfo>({ song: null, artist: null, lyric: null, emotion: null });
+  const [songInfo, setSongInfo] = useState<SongInfo>({
+    song: null,
+    artist: null,
+    lyric: null,
+    emotion: null,
+    source: null,
+  });
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([
-    { role: "bot", text: "¡Hola! Soy RhythmBot. Presiona el botón de grabar para que analice tu música y tu vibra." },
+    {
+      role: "bot",
+      text: "¡Hola! Soy Vybo. Presiona el botón de grabar para que analice tu música y tu vibra.",
+    },
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -55,24 +67,46 @@ export default function Dashboard() {
 
         const response: BotResponse = await res.json();
 
-        // Actualizar info de la canción solo si se detectó algo
-        if (response.detected_song) {
+        const resolvedSong =
+          response.detected_song || response.recommended_song || null;
+        const resolvedArtist =
+          response.detected_artist || response.recommended_artist || null;
+        const resolvedSource = response.detected_song
+          ? "detected"
+          : response.recommended_song
+            ? "recommended"
+            : null;
+
+        if (resolvedSong) {
           setSongInfo({
-            song: response.detected_song,
-            artist: response.detected_artist,
+            song: resolvedSong,
+            artist: resolvedArtist,
             lyric: response.current_lyric || response.display_text,
             emotion: response.emotion,
+            source: resolvedSource,
+          });
+        } else {
+          setSongInfo({
+            song: null,
+            artist: null,
+            lyric: null,
+            emotion: response.emotion,
+            source: null,
           });
         }
 
         // Agregar mensaje del bot al chat
-        setMessages((prev) => [...prev, { role: "bot", text: response.bot_message }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "bot", text: response.bot_message },
+        ]);
 
         // Enviar comandos al ESP32 si está conectado
         if (serial.status === "connected") {
           if (response.mood_command) serial.sendCommand(response.mood_command);
           setTimeout(() => {
-            if (response.look_command) serial.sendCommand(response.look_command);
+            if (response.look_command)
+              serial.sendCommand(response.look_command);
           }, 300);
           setTimeout(() => {
             if (response.display_text) {
@@ -90,23 +124,29 @@ export default function Dashboard() {
         console.error(error);
         setMessages((prev) => [
           ...prev,
-          { role: "bot", text: "❌ No pude conectarme al backend. Asegúrate de que esté corriendo (uvicorn main:app --reload)" },
+          {
+            role: "bot",
+            text: "❌ No pude conectarme al backend. Asegúrate de que esté corriendo (uvicorn main:app --reload)",
+          },
         ]);
         return null;
       }
     },
-    [serial]
+    [serial],
   );
 
   // Handler: Grabar video + audio → enviar al backend
   const handleRecord = useCallback(
     async (videoB64: string, audioB64: string) => {
-      setMessages((prev) => [...prev, { role: "user", text: "🎬 Grabé 5s de video y audio. Analizando..." }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", text: "🎬 Grabé 5s de video y audio. Analizando..." },
+      ]);
       setIsProcessing(true);
       await sendToBackend({ video_b64: videoB64, audio_b64: audioB64 });
       setIsProcessing(false);
     },
-    [sendToBackend]
+    [sendToBackend],
   );
 
   return (
@@ -114,19 +154,24 @@ export default function Dashboard() {
       {/* Navbar Minimalista */}
       <nav className="bg-white border-b border-zinc-200 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-4">
-          <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-zinc-100 text-zinc-500 transition-colors">
+          <Link
+            href="/"
+            className="p-2 -ml-2 rounded-full hover:bg-zinc-100 text-zinc-500 transition-colors"
+          >
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <h1 className="font-semibold text-lg tracking-tight">EmotiBot Panel</h1>
+          <h1 className="font-semibold text-lg tracking-tight">Vybo Panel</h1>
         </div>
       </nav>
 
       {/* Main Content Layout */}
-      <main className="max-w-6xl mx-auto px-6 pt-12">
+      <main className="max-w-7xl mx-auto px-6 pt-12">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Columna Izquierda: Chat */}
-          <div className="lg:col-span-8">
-            <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">Conversación</h2>
+          <div className="lg:col-span-7">
+            <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">
+              Conversación
+            </h2>
             <ChatInterface
               messages={messages}
               onRecord={handleRecord}
@@ -135,8 +180,10 @@ export default function Dashboard() {
           </div>
 
           {/* Columna Derecha: Tarjetas */}
-          <div className="lg:col-span-4 space-y-6">
-            <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">Estado del Sistema</h2>
+          <div className="lg:col-span-5 space-y-6">
+            <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">
+              Estado del Sistema
+            </h2>
             <RobotStatusCard
               status={serial.status}
               onConnect={serial.connect}
@@ -147,6 +194,7 @@ export default function Dashboard() {
               artistName={songInfo.artist}
               currentLyric={songInfo.lyric}
               emotion={songInfo.emotion}
+              source={songInfo.source}
             />
           </div>
         </div>
