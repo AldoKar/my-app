@@ -6,9 +6,10 @@ interface MusicPlayerCardProps {
   songName: string | null;
   artistName: string | null;
   currentLyric: string | null;
+  emotion?: string | null;
 }
 
-export default function MusicPlayerCard({ songName, artistName, currentLyric }: MusicPlayerCardProps) {
+export default function MusicPlayerCard({ songName, artistName, currentLyric, emotion }: MusicPlayerCardProps) {
   const isPlaying = !!songName;
 
   return (
@@ -27,23 +28,17 @@ export default function MusicPlayerCard({ songName, artistName, currentLyric }: 
         </div>
         <div>
           <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">
-            {isDummy ? "Vibra Actual" : "Sugerencia de IA"}
+            {isPlaying ? "Vibra Actual" : "Esperando..."}
           </p>
           <h3 className="font-semibold text-zinc-900 text-sm md:text-base leading-tight pr-4">
-            {displayTitle}
+            {songName || "Sin canción"}
           </h3>
+          <p className="text-sm text-zinc-500 mb-2">{artistName || "Presiona Escuchar"}</p>
           {emotion && (
-            <p className="text-xs text-blue-600 mt-1 uppercase tracking-wider font-semibold">
+            <p className="inline-block px-2 py-1 bg-blue-100 rounded-md text-xs text-blue-600 uppercase tracking-wider font-semibold">
               Mood: {emotion}
             </p>
           )}
-          <p className="text-xs font-bold tracking-widest text-zinc-400 uppercase mb-1">
-            {isPlaying ? "Now Playing" : "Esperando..."}
-          </p>
-          <h3 className="font-semibold text-zinc-900 text-lg leading-tight">
-            {songName || "Sin canción"}
-          </h3>
-          <p className="text-sm text-zinc-500">{artistName || "Presiona Escuchar"}</p>
         </div>
       </div>
 
@@ -63,14 +58,14 @@ export default function MusicPlayerCard({ songName, artistName, currentLyric }: 
           </p>
         </div>
       )}
-      <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
-        <Quote className="w-4 h-4 text-zinc-300 mb-2" />
-        <p className="text-zinc-700 italic text-sm leading-relaxed">
-          {isDummy
-            ? "Envíale un mensaje a EmotiBot para que escuche tu entorno y te recomiende algo."
-            : "¡Esta es la canción perfecta para el ambiente y la vibra que acabo de analizar en tu rostro y entorno!"}
-        </p>
-      </div>
+      {!isPlaying && (
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-100 relative z-10">
+          <Quote className="w-4 h-4 text-zinc-300 mb-2" />
+          <p className="text-zinc-700 italic text-sm leading-relaxed">
+            Envíale un mensaje a EmotiBot para que escuche tu entorno y te recomiende algo.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

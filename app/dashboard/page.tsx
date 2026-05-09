@@ -7,13 +7,13 @@ import MusicPlayerCard from "@/components/dashboard/MusicPlayerCard";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { useSerialPort } from "@/lib/useSerialPort";
-import { useAudioCapture } from "@/lib/useAudioCapture";
 
 // Tipos compartidos
 export interface SongInfo {
   song: string | null;
   artist: string | null;
   lyric: string | null;
+  emotion: string | null;
 }
 
 export interface BotResponse {
@@ -31,15 +31,15 @@ export interface BotResponse {
 export default function Dashboard() {
   // Estado compartido
   const serial = useSerialPort();
-  const audio = useAudioCapture();
-  const [songInfo, setSongInfo] = useState<SongInfo>({ song: null, artist: null, lyric: null });
+  const [songInfo, setSongInfo] = useState<SongInfo>({ song: null, artist: null, lyric: null, emotion: null });
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([
-    { role: "bot", text: "¡Hola! Soy EmotiBot. Conecta el robot y presiona \"🎤 Escuchar\" para que analice la música del ambiente." },
+    { role: "bot", text: "¡Hola! Soy RhythmBot. Presiona el botón de grabar para que analice tu música y tu vibra." },
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
+
   // Función central: enviar datos al backend y procesar respuesta
   const sendToBackend = useCallback(
-    async (payload: { message?: string; audio_b64?: string }) => {
+    async (payload: { audio_b64?: string; video_b64?: string }) => {
       try {
         const res = await fetch("http://127.0.0.1:8000/api/analyze", {
           method: "POST",
@@ -55,12 +55,15 @@ export default function Dashboard() {
 
         const response: BotResponse = await res.json();
 
-        // Actualizar info de la canción
-        setSongInfo({
-          song: response.detected_song,
-          artist: response.detected_artist,
-          lyric: response.current_lyric,
-        });
+        // Actualizar info de la canción solo si se detectó algo
+        if (response.detected_song) {
+          setSongInfo({
+            song: response.detected_song,
+            artist: response.detected_artist,
+            lyric: response.current_lyric || response.display_text,
+            emotion: response.emotion,
+          });
+        }
 
         // Agregar mensaje del bot al chat
         setMessages((prev) => [...prev, { role: "bot", text: response.bot_message }]);
@@ -95,28 +98,12 @@ export default function Dashboard() {
     [serial]
   );
 
-  // Handler: Escuchar ambiente (grabar audio → enviar al backend)
-  const handleListen = useCallback(async () => {
-    if (audio.status !== "idle") return;
-    setIsProcessing(true);
-    setMessages((prev) => [...prev, { role: "user", text: "🎤 Escuchando el ambiente por 5 segundos..." }]);
-
-    try {
-      const audioB64 = await audio.startCapture(5);
-      setMessages((prev) => [...prev, { role: "user", text: "🔄 Analizando audio con ACRCloud y Gemini..." }]);
-      await sendToBackend({ audio_b64: audioB64 });
-    } catch (err) {
-      setMessages((prev) => [...prev, { role: "bot", text: "Error capturando audio. Revisa los permisos del micrófono." }]);
-    }
-    setIsProcessing(false);
-  }, [audio, sendToBackend]);
-
-  // Handler: Enviar mensaje de texto
-  const handleSendMessage = useCallback(
-    async (text: string) => {
-      setMessages((prev) => [...prev, { role: "user", text }]);
+  // Handler: Grabar video + audio → enviar al backend
+  const handleRecord = useCallback(
+    async (videoB64: string, audioB64: string) => {
+      setMessages((prev) => [...prev, { role: "user", text: "🎬 Grabé 5s de video y audio. Analizando..." }]);
       setIsProcessing(true);
-      await sendToBackend({ message: text });
+      await sendToBackend({ video_b64: videoB64, audio_b64: audioB64 });
       setIsProcessing(false);
     },
     [sendToBackend]
@@ -142,11 +129,8 @@ export default function Dashboard() {
             <h2 className="text-2xl font-medium tracking-tight mb-6 text-zinc-800">Conversación</h2>
             <ChatInterface
               messages={messages}
-              onSendMessage={handleSendMessage}
-              onListen={handleListen}
+              onRecord={handleRecord}
               isProcessing={isProcessing}
-              audioStatus={audio.status}
-              secondsLeft={audio.secondsLeft}
             />
           </div>
 
@@ -162,6 +146,7 @@ export default function Dashboard() {
               songName={songInfo.song}
               artistName={songInfo.artist}
               currentLyric={songInfo.lyric}
+              emotion={songInfo.emotion}
             />
           </div>
         </div>

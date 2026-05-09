@@ -321,10 +321,11 @@ void setup()
   }
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("Gemini Agent Ready");
+  display.setTextSize(2);
+  display.setCursor(20, 24);
+  display.println("Soy Vybo");
   display.display();
+  delay(5000);
 
   // Startup RoboEyes animation engine on top of this display
   roboEyes.begin(SCREEN_WIDTH, SCREEN_HEIGHT, 80);

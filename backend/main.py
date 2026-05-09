@@ -6,7 +6,7 @@ import hmac
 import time
 import asyncio
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from pydantic import BaseModel, Field
@@ -18,7 +18,7 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 # Cargar variables de entorno
-load_dotenv("backend/.env")
+load_dotenv()
 
 # Configurar Gemini
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -49,12 +49,13 @@ app.add_middleware(
 class AnalyzeRequest(BaseModel):
     message: str = ""
     audio_b64: str | None = None
+    video_b64: str | None = None
 
 class RhythmBotResponse(BaseModel):
     emotion: str = Field(description="Must be one of: energetic, calm, sad, happy, tense, neutral")
     mood_command: str = Field(description="ESP32 serial command. Must be one of: 'mood happy', 'mood sad', 'mood surprised', 'mood wink', 'mood neutral'")
     look_command: str = Field(description="ESP32 look command. Must be one of: 'look left', 'look right', 'look up', 'look down', 'look center'")
-    display_text: str = Field(description="Texto corto en español (max 15 chars) para mostrar en la pantalla OLED")
+    display_text: str = Field(description="Texto corto en español (max 20 chars) para mostrar en la pantalla OLED. Si hay cancion detectada, pon un verso corto favorito de la letra.")
     bot_message: str = Field(description="A friendly, empathetic chat message in Spanish responding to the music vibe")
     screen_color: str = Field(description="Hex color code representing the mood")
 
@@ -199,11 +200,14 @@ async def analyze(req: AnalyzeRequest):
             "REGLAS IMPORTANTES:\n"
             "- mood_command DEBE ser exactamente uno de: 'mood happy', 'mood sad', 'mood surprised', 'mood wink', 'mood neutral'\n"
             "- look_command DEBE ser exactamente uno de: 'look left', 'look right', 'look up', 'look down', 'look center'\n"
-            "- display_text DEBE tener máximo 15 caracteres (es una pantalla OLED de 128x64) y DEBE estar en español.\n"
-            "- NUNCA dejes display_text vacío ni uses puntos suspensivos (...). Escribe una palabra o frase corta representativa (ej: 'Genial!', 'Temazo', 'Bailando').\n"
-            "- NO uses acentos ni caracteres especiales (ñ, ¿, ¡) en display_text, ya que la pantalla OLED no los soporta.\n"
-            "- En bot_message, actúa como mi mejor amigo. No des respuestas robóticas ni digas 'pensando'. ¡Sé muy conversador! Si detectaste una canción, banda o letra, CUÉNTAME UN DATO CURIOSO (fun fact) fascinante sobre la banda, la canción o su contexto histórico. Habla en español de forma súper natural y relajada.\n"
-            "- Elige emociones vibrantes, no seas conservador. Si la canción es alegre, pon 'mood happy'."
+            "- display_text DEBE tener maximo 40 caracteres (pantalla OLED 128x64 con textSize 2, 10 chars por linea, 4 lineas).\n"
+            "- Si detectaste una cancion, en display_text PON UN VERSO CORTO FAVORITO de la letra (max 40 chars). Ejemplo: 'Is this the real life' o 'Let it be'. Debe ser un fragmento icónico de la canción.\n"
+            "- Si NO hay cancion, escribe una frase corta representativa (ej: 'Que onda!', 'Temazo', 'Bailando').\n"
+            "- NUNCA dejes display_text vacio ni uses puntos suspensivos (...).\n"
+            "- NO uses acentos ni caracteres especiales (ñ, ¿, ¡, tildes) en display_text, ya que la pantalla OLED no los soporta. Reemplaza letras acentuadas por su version sin acento.\n"
+            "- En bot_message, actua como mi mejor amigo. No des respuestas roboticas ni digas 'pensando'. Se muy conversador! Si detectaste una cancion, banda o letra, CUENTAME UN DATO CURIOSO (fun fact) fascinante sobre la banda, la cancion o su contexto historico. Habla en español de forma super natural y relajada.\n"
+            "- Elige emociones vibrantes, no seas conservador. Si la cancion es alegre, pon 'mood happy'.\n"
+            "- IMPORTANTE: Si recibes un video, evalua la expresion facial y lenguaje corporal del usuario. Menciona en bot_message lo que ves en el video y usa eso para ajustar el mood."
         ),
     )
 
@@ -252,38 +256,57 @@ async def analyze(req: AnalyzeRequest):
         audio_bytes = base64.b64decode(req.audio_b64)
         prompt_parts.append({"mime_type": "audio/webm", "data": audio_bytes})
 
-            # Si no enviaron nada, saltar
-            if not prompt_parts:
-                print("[WARN] No se recibieron partes para el prompt")
-                await websocket.send_json({"error": "No data received"})
-                continue
+    # Si mandaron video, subir con File API
+    video_file = None
+    temp_video_path = None
+    if req.video_b64:
+        import tempfile
+        video_bytes = base64.b64decode(req.video_b64)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_video:
+            temp_video.write(video_bytes)
+            temp_video_path = temp_video.name
+            
+        print(f"🎬 Subiendo video a Gemini File API...")
+        video_file = genai.upload_file(path=temp_video_path, mime_type="video/webm")
+        
+        # Esperar procesamiento
+        while video_file.state.name == "PROCESSING":
+            print("⏳ Procesando video en Gemini...")
+            time.sleep(2)
+            video_file = genai.get_file(video_file.name)
+            
+        if video_file.state.name == "FAILED":
+            print("❌ Error procesando el video en Gemini")
+        else:
+            prompt_parts.append(video_file)
 
-            try:
-                # 3. Llamar a Gemini (async para no bloquear)
-                print("[INFO] Llamando a Gemini...")
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    prompt_parts,
-                    generation_config=genai.GenerationConfig(
-                        response_mime_type="application/json",
-                        response_schema=RhythmBotResponse,
-                        temperature=0.4
-                    )
-                )
-                
-                # 4. Enviar el JSON perfecto al frontend
-                print(f"[OK] Respuesta de Gemini recibida: {response.text}")
-                json_response = json.loads(response.text)
-                await websocket.send_json(json_response)
-                
-            except Exception as e:
-                print(f"[WARN] Error de Gemini: {e}")
-                import traceback
-                traceback.print_exc()
-                await websocket.send_json(FALLBACK_RESPONSE)
-                
-    except WebSocketDisconnect:
-        print("[DISCONNECT] Cliente desconectado")
+    # 3. Llamar a Gemini
+    try:
+        response = await asyncio.to_thread(
+            model.generate_content,
+            prompt_parts,
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=RhythmBotResponse,
+                temperature=0.4,
+            ),
+            safety_settings={
+                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+            }
+        )
+
+        json_response = json.loads(response.text)
+        json_response["detected_song"] = detected_song
+        json_response["detected_artist"] = detected_artist
+        json_response["current_lyric"] = current_lyric
+
+        print(f"✅ {json_response.get('emotion')} → {json_response.get('mood_command')}")
+        return json_response
+
     except Exception as e:
         print(f"⚠️ Error de Gemini: {e}")
         fallback = {**FALLBACK_RESPONSE}
@@ -292,3 +315,120 @@ async def analyze(req: AnalyzeRequest):
         fallback["detected_artist"] = detected_artist
         fallback["current_lyric"] = current_lyric
         return fallback
+    finally:
+        # Limpieza de archivos de video
+        if video_file:
+            try:
+                genai.delete_file(video_file.name)
+                print("🧹 Video borrado de Gemini")
+            except Exception as e:
+                print(f"Error borrando de Gemini: {e}")
+        if temp_video_path and os.path.exists(temp_video_path):
+            try:
+                os.remove(temp_video_path)
+            except Exception:
+                pass
+
+# ---------------------------------------------------------
+# WEBSOCKET ENDPOINT
+# ---------------------------------------------------------
+@app.websocket("/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("[INFO] Cliente WebSocket conectado")
+    
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=(
+            "Eres RhythmBot, un robot físico con pantalla OLED que muestra expresiones faciales "
+            "y servomotores que mueven su cabeza. Tu trabajo es analizar canciones y sus letras "
+            "para decidir qué emoción expresar físicamente.\n\n"
+            "REGLAS IMPORTANTES:\n"
+            "- mood_command DEBE ser exactamente uno de: 'mood happy', 'mood sad', 'mood surprised', 'mood wink', 'mood neutral'\n"
+            "- look_command DEBE ser exactamente uno de: 'look left', 'look right', 'look up', 'look down', 'look center'\n"
+            "- display_text DEBE tener máximo 15 caracteres (es una pantalla OLED de 128x64) y DEBE estar en español.\n"
+            "- NUNCA dejes display_text vacío ni uses puntos suspensivos (...). Escribe una palabra o frase corta representativa (ej: 'Genial!', 'Temazo', 'Bailando').\n"
+            "- NO uses acentos ni caracteres especiales (ñ, ¿, ¡) en display_text, ya que la pantalla OLED no los soporta.\n"
+            "- En bot_message, actúa como mi mejor amigo. No des respuestas robóticas ni digas 'pensando'. ¡Sé muy conversador! Si detectaste una canción, banda o letra, CUÉNTAME UN DATO CURIOSO (fun fact) fascinante sobre la banda, la canción o su contexto histórico. Habla en español de forma súper natural y relajada.\n"
+            "- Elige emociones vibrantes, no seas conservador. Si la canción es alegre, pon 'mood happy'."
+        ),
+    )
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            
+            prompt_parts = []
+            
+            # Analizar audio si existe
+            detected_song = None
+            detected_artist = None
+            current_lyric = None
+            
+            if payload.get("audio_b64"):
+                audio_bytes = base64.b64decode(payload["audio_b64"])
+                song_info = await identify_song(audio_bytes)
+                
+                if song_info:
+                    detected_song = song_info["title"]
+                    detected_artist = song_info["artist"]
+                    play_offset = song_info["play_offset_ms"]
+                    lyric = await get_synced_lyric(detected_song, detected_artist, play_offset)
+                    if lyric:
+                        current_lyric = lyric
+                    
+                    context = f"Se detectó la canción '{detected_song}' del artista '{detected_artist}'."
+                    if current_lyric:
+                        context += f"\nLa letra en este momento dice: \"{current_lyric}\""
+                    prompt_parts.append(context)
+                else:
+                    prompt_parts.append({"mime_type": "audio/webm", "data": audio_bytes})
+
+            # Añadir imagen si existe
+            if payload.get("image_b64"):
+                prompt_parts.append({"mime_type": "image/jpeg", "data": base64.b64decode(payload["image_b64"])})
+
+            # Añadir mensaje de texto
+            if payload.get("message"):
+                prompt_parts.append(payload["message"])
+
+            if not prompt_parts:
+                await websocket.send_json({"error": "No data received"})
+                continue
+
+            try:
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    prompt_parts,
+                    generation_config=genai.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=RhythmBotResponse,
+                        temperature=0.4
+                    ),
+                    safety_settings={
+                        genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                        genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                        genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                        genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    }
+                )
+                
+                json_response = json.loads(response.text)
+                json_response["detected_song"] = detected_song
+                json_response["detected_artist"] = detected_artist
+                json_response["current_lyric"] = current_lyric
+                
+                await websocket.send_json(json_response)
+                
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                fallback = {**FALLBACK_RESPONSE}
+                fallback["bot_message"] = f"Hubo un pequeño cortocircuito en mis emociones. (Detalle técnico: {str(e)})"
+                await websocket.send_json(fallback)
+                
+    except WebSocketDisconnect:
+        print("[DISCONNECT] Cliente desconectado")
+    except Exception as e:
+        print(f"⚠️ Error general WebSocket: {e}")
